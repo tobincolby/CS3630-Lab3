@@ -66,19 +66,6 @@ def measurement_update(particles, measured_marker_list, grid):
                 after measurement update
     """
 
-    def closest_particle_marker(particle_markers, robot_marker):
-
-        minDistance = grid_distance(particle_markers[0][0],particle_markers[0][1], robot_marker[0], robot_marker[1])
-        minAngle = diff_heading_deg(particle_markers[0][2], robot_marker[2])
-
-        for particle_marker in particle_markers:
-            dist = grid_distance(particle_marker[0], particle_marker[1], robot_marker[0], robot_marker[1])
-            if minDistance > dist:
-                minDistance = dist
-                minAngle = diff_heading_deg(particle_marker[2], robot_marker[2])
-
-        return minDistance, minAngle
-
     weights = [1.0 for _ in range(len(particles))]
 
     for i, particle in enumerate(particles):
@@ -94,16 +81,18 @@ def measurement_update(particles, measured_marker_list, grid):
             new_robot_marker = add_marker_measurement_noise(robot_marker, MARKER_TRANS_SIGMA, MARKER_ROT_SIGMA)
 
             if len(particle_markers) > 0:
-                min_distance, min_angle = closest_particle_marker(particle_markers, new_robot_marker)
-
+                min_distance, min_angle, min_particle_marker = closest_particle_marker(particle_markers, new_robot_marker)
+                particle_markers.remove(min_particle_marker)
                 exponent = ((min_distance ** 2) / (2 * (MARKER_TRANS_SIGMA ** 2))) + \
                            ((min_angle ** 2) / (2 * (MARKER_ROT_SIGMA ** 2)))
                 weights[i] *= numpy.exp(-exponent)
             else:
-                weights[i] = 0.0
+                weights[i] *= DETECTION_FAILURE_RATE
 
-        if not len(measured_marker_list) == len(particle_markers):
-            weights[i] *= DETECTION_FAILURE_RATE ** (abs(len(measured_marker_list) - len(particle_markers)))
+        for _ in particle_markers:
+            weights[i] *= SPURIOUS_DETECTION_RATE
+
+        weights[i] = max(weights[i], SPURIOUS_DETECTION_RATE * DETECTION_FAILURE_RATE)
 
 
     weight_sum = sum(weights)
@@ -113,7 +102,7 @@ def measurement_update(particles, measured_marker_list, grid):
         for i in range(len(weights)):
             weights[i] /= weight_sum
 
-    random_particles = Particle.create_random(200, grid)
+    random_particles = Particle.create_random(250, grid)
 
     chosen_particles = numpy.random.choice(particles, len(particles) - len(random_particles), True, weights)
 
@@ -122,3 +111,17 @@ def measurement_update(particles, measured_marker_list, grid):
     return measured_particles
 
 
+def closest_particle_marker(particle_markers, robot_marker):
+    minDistance = grid_distance(particle_markers[0][0], particle_markers[0][1], robot_marker[0], robot_marker[1])
+    minAngle = diff_heading_deg(particle_markers[0][2], robot_marker[2])
+    minParticleMarker = particle_markers[0]
+
+    for particle_marker in particle_markers:
+        new_particle_marker = add_marker_measurement_noise(particle_marker, MARKER_TRANS_SIGMA, MARKER_ROT_SIGMA)
+        dist = grid_distance(new_particle_marker[0], new_particle_marker[1], robot_marker[0], robot_marker[1])
+        if minDistance > dist:
+            minDistance = dist
+            minAngle = diff_heading_deg(particle_marker[2], robot_marker[2])
+            minParticleMarker = particle_marker
+
+    return minDistance, minAngle, minParticleMarker
